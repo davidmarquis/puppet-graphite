@@ -20,7 +20,10 @@ class graphite::config inherits graphite::params {
 	# we need an apache with python support
 
 	package {
-		"${::graphite::params::apache_pkg}": ensure => installed;
+		"${::graphite::params::apache_pkg}": 
+			ensure => installed,
+			before => Exec['Chown graphite for apache'],
+			notify => Exec['Chown graphite for apache'];
 	}
 
 	package {
@@ -72,7 +75,8 @@ class graphite::config inherits graphite::params {
 		refreshonly => true,
 		notify      => Exec['Chown graphite for apache'],
 		subscribe   => Exec["Install webapp ${::graphite::params::graphiteVersion}"],
-		before      => Exec['Chown graphite for apache'];
+		before      => Exec['Chown graphite for apache'],
+		require     => File['/opt/graphite/webapp/graphite/local_settings.py'];
 	}
 
 	# change access permissions for apache
@@ -81,7 +85,10 @@ class graphite::config inherits graphite::params {
 		command     => "chown -R ${::graphite::params::web_user}:${::graphite::params::web_user} /opt/graphite/storage/",
 		cwd         => '/opt/graphite/',
 		refreshonly => true,
-		require     => Anchor['graphite::install::end'],
+		require     => [
+			Anchor['graphite::install::end'],
+			Package["${::graphite::params::apache_pkg}"]
+		]
 	}
 
 	# Deploy configfiles
@@ -92,13 +99,15 @@ class graphite::config inherits graphite::params {
 			owner   => $::graphite::params::web_user,
 			group   => $::graphite::params::web_user,
 			mode    => '0644',
-			content => template("graphite/opt/graphite/webapp/graphite/local_settings.py_${::fqdn}.erb");
-        '/opt/graphite/conf/graphite.wsgi':
-            ensure  => file,
-            owner   => $::graphite::params::web_user,
-            group   => $::graphite::params::web_user,
-            mode    => '0644',
-            content => template("graphite/opt/graphite/conf/graphite.wsgi.erb");
+			content => template("graphite/opt/graphite/webapp/graphite/local_settings.py.erb"),
+			require => Package["${::graphite::params::apache_pkg}"];
+		'/opt/graphite/conf/graphite.wsgi':
+			ensure  => file,
+			owner   => $::graphite::params::web_user,
+			group   => $::graphite::params::web_user,
+			mode    => '0644',
+			content => template("graphite/opt/graphite/conf/graphite.wsgi.erb"),
+			require => Package["${::graphite::params::apache_pkg}"];
 		"${::graphite::params::apache_dir}/ports.conf":
 			ensure  => file,
 			owner   => $::graphite::params::web_user,
@@ -107,7 +116,8 @@ class graphite::config inherits graphite::params {
 			content => template('graphite/etc/apache2/ports.conf.erb'),
 			require => [
 				Package["${::graphite::params::apache_python_pkg}"],
-				Exec['Initial django db creation']
+				Exec['Initial django db creation'],
+				Exec['Chown graphite for apache']
 			];
 		"${::graphite::params::apacheconf_dir}/graphite.conf":
 			ensure  => file,
@@ -177,7 +187,7 @@ class graphite::config inherits graphite::params {
 	}
 
 	file { '/etc/init.d/carbon-cache':
-		ensure  => present,
+		ensure  => file,
 		mode    => '0750',
 		content => template('graphite/etc/init.d/carbon-cache.erb'),
 		require => File['/opt/graphite/conf/carbon.conf'];
